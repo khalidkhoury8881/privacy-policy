@@ -27,8 +27,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Ensure gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Build release AAB
-        run: ./gradlew bundleRelease
+        run: ./gradlew --no-daemon bundleRelease
 
       - name: Upload release AAB
         uses: actions/upload-artifact@v4

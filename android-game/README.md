@@ -16,6 +16,7 @@ From repo root:
 
 ```bash
 cd android-game
+chmod +x ./gradlew
 ./gradlew bundleRelease
 ```
 
@@ -28,7 +29,8 @@ Workflow file:
 
 `.github/workflows/android-release-aab.yml`
 
-The workflow runs `./gradlew bundleRelease` and uploads:
+The workflow runs `chmod +x ./gradlew
+./gradlew bundleRelease` and uploads:
 
 `android-game/app/build/outputs/bundle/release/app-release.aab`
 
