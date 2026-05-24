@@ -1,0 +1,14 @@
+#!/bin/sh
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -x "$DIR/gradle-8.7/bin/gradle" ]; then
+  exec "$DIR/gradle-8.7/bin/gradle" "$@"
+fi
+
+if command -v gradle >/dev/null 2>&1; then
+  exec gradle "$@"
+fi
+
+echo "Gradle is not installed. Install Gradle or add full wrapper files (gradle-wrapper.jar)." >&2
+exit 1
