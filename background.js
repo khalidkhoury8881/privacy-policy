@@ -1,0 +1,13 @@
+const STORAGE_KEY='actlater.items';
+const BACKUP_ALARM='actlater.backupCheck';
+const alarmName=id=>`actlater.reminder.${id}`;
+async function getItems(){return (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY]||[]}
+async function setItems(items){await chrome.storage.local.set({[STORAGE_KEY]:items})}
+async function scheduleItem(item){if(item.reminderAt>Date.now()) await chrome.alarms.create(alarmName(item.id),{when:item.reminderAt})}
+async function notify(item,prefix='ActLater reminder'){const id=`actlater-${item.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`; await chrome.notifications.create(id,{type:'basic',iconUrl:'icon.svg',title:prefix,message:item.title||'Time to try this.',contextMessage:item.note||item.url||''}); return id}
+async function checkDue(){const items=await getItems(); let changed=false; for(const item of items){if(!item.tried&&!item.notifiedAt&&item.reminderAt<=Date.now()){await notify(item); item.notifiedAt=Date.now(); changed=true}} if(changed) await setItems(items)}
+chrome.runtime.onInstalled.addListener(async()=>{await chrome.alarms.create(BACKUP_ALARM,{periodInMinutes:1}); for(const item of await getItems()) await scheduleItem(item)});
+chrome.runtime.onStartup.addListener(async()=>{await chrome.alarms.create(BACKUP_ALARM,{periodInMinutes:1}); for(const item of await getItems()) await scheduleItem(item); await checkDue()});
+chrome.alarms.onAlarm.addListener(async alarm=>{if(alarm.name===BACKUP_ALARM){await checkDue();return} if(alarm.name.startsWith('actlater.reminder.')) await checkDue()});
+chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{(async()=>{if(msg.type==='OPEN_DASHBOARD'){await chrome.tabs.create({url:chrome.runtime.getURL('dashboard.html')}); sendResponse({ok:true}); return} if(msg.type==='TEST_NOTIFICATION'){await notify({id:crypto.randomUUID(),title:'ActLater test notification',note:'Notifications are working.'},'ActLater'); sendResponse({ok:true}); return} if(msg.type==='SAVE_REMINDER'){const item=msg.item; if(!item||item.reminderAt<=Date.now()) throw new Error('Reminder time must be in the future.'); const items=await getItems(); items.unshift(item); await setItems(items); await scheduleItem(item); sendResponse({ok:true}); return} if(msg.type==='GET_REMINDERS'){sendResponse({ok:true,items:await getItems()}); return} if(msg.type==='UPDATE_REMINDERS'){const updated=msg.items||[]; await setItems(updated); for(const item of updated) await scheduleItem(item); sendResponse({ok:true}); return}})().catch(e=>sendResponse({ok:false,error:e.message})); return true});
+chrome.notifications.onClicked.addListener(async id=>{const items=await getItems(); const item=items.find(i=>id.includes(i.id)); if(item?.url) await chrome.tabs.create({url:item.url})});
