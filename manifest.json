@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "ActLater",
+  "version": "1.0.0",
+  "description": "Save pages to try later and get reliable reminders.",
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ActLater"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "reminderForm.js",
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ]
+    }
+  ],
+  "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

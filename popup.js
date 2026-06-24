@@ -1,0 +1,1 @@
+document.addEventListener('DOMContentLoaded',()=>{chrome.tabs.query({active:true,currentWindow:true},tabs=>{const tab=tabs[0]||{}; createReminderForm(document.getElementById('app'),{title:tab.title||'',url:tab.url||'',sourceTitle:tab.title||''});});});
