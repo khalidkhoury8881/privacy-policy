@@ -83,10 +83,10 @@
           <div class="live-box">
             <div class="live-head"><strong>ما التقطه التعرف الصوتي</strong><span id="liveBadge">لم يبدأ</span></div>
             <p id="liveTranscript" class="placeholder">سيظهر هنا النص الذي يلتقطه المتصفح أثناء القراءة.</p>
-            <div class="audio-meter" aria-label="مستوى صوت الميكروفون">
-              <span>مستوى الصوت</span>
+            <div class="audio-meter" aria-label="حالة التقاط الصوت">
+              <span>حالة الصوت</span>
               <div class="audio-track"><div class="audio-fill" id="audioFill"></div></div>
-              <span class="audio-value" id="audioValue">0%</span>
+              <span class="audio-value" id="audioValue">جاهز</span>
             </div>
           </div>
 
@@ -145,7 +145,7 @@
       </section>
     </main>
 
-    <footer><span>بصيرة أداة مساندة للتعلم وتحليل أنماط القراءة، ولا تقدم تشخيصًا طبيًا أو بديلًا عن تقييم المختصين.</span><b dir="ltr">Prepared by Khalid Khoury · Web Demo v1.3</b></footer>
+    <footer><span>بصيرة أداة مساندة للتعلم وتحليل أنماط القراءة، ولا تقدم تشخيصًا طبيًا أو بديلًا عن تقييم المختصين.</span><b dir="ltr">Prepared by Khalid Khoury · Web Demo v1.4</b></footer>
   </div>
   <script>
 (() => {
@@ -268,6 +268,20 @@
     el('audioValue').textContent = pct + '%';
   }
 
+  function updateRecognitionMeter(stage) {
+    const map = {
+      ready: [8, 'جاهز'],
+      audio: [45, 'صوت'],
+      sound: [65, 'إشارة'],
+      speech: [85, 'كلام'],
+      result: [100, 'نص ✓'],
+      error: [12, 'تعذر']
+    };
+    const v = map[stage] || map.ready;
+    el('audioFill').style.width = v[0] + '%';
+    el('audioValue').textContent = v[1];
+  }
+
   function startAudioMeter(stream) {
     stopAudioMeter(false);
     try {
@@ -333,17 +347,14 @@
 
   async function requestMic() {
     if (!supportsMic) throw new Error('لا يوفّر هذا المتصفح واجهة للوصول إلى الميكروفون.');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
-    state.mediaStream = stream;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // مهم على Android: نتحقق من الإذن ثم نحرر قناة الميكروفون قبل تشغيل Web Speech.
+    // إبقاء MediaStream مفتوحًا بالتوازي قد يمنع محرك التعرف من الاستحواذ على المدخل.
+    try { stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    state.mediaStream = null;
     state.peakAudioLevel = 0;
-    startAudioMeter(stream);
-    return stream;
+    updateRecognitionMeter('ready');
+    return true;
   }
 
   function createRecognition() {
@@ -352,15 +363,38 @@
     r.lang = state.recognitionLangs[langIndex];
     r.interimResults = true;
     r.continuous = false;
-    r.maxAlternatives = 3;
+    r.maxAlternatives = 1;
 
     r.onstart = () => {
       state.listening = true;
       state.error = null;
-      setStatus('live', 'الميكروفون يعمل — جارٍ الاستماع', 'اقرأ النص بصوت واضح. سيظهر ما يلتقطه المتصفح أسفل النص.');
+      updateRecognitionMeter('ready');
+      setStatus('live', 'خدمة التعرف جاهزة — ابدأ القراءة الآن', 'اقرأ النص بصوت واضح وبسرعة طبيعية.');
       el('finishReading').classList.remove('hidden');
       el('fallbackDemo').classList.add('hidden');
       updateTranscript();
+    };
+
+    r.onaudiostart = () => {
+      state.peakAudioLevel = Math.max(state.peakAudioLevel, 0.15);
+      updateRecognitionMeter('audio');
+      setStatus('live', 'وصل الصوت إلى Chrome', 'استمر في القراءة.');
+    };
+
+    r.onsoundstart = () => {
+      state.peakAudioLevel = Math.max(state.peakAudioLevel, 0.3);
+      updateRecognitionMeter('sound');
+    };
+
+    r.onspeechstart = () => {
+      state.peakAudioLevel = Math.max(state.peakAudioLevel, 0.5);
+      updateRecognitionMeter('speech');
+      setStatus('live', 'تم اكتشاف كلام — جارٍ التحويل إلى نص', 'استمر في القراءة حتى تظهر الكلمات.');
+    };
+
+    r.onnomatch = () => {
+      state.peakAudioLevel = Math.max(state.peakAudioLevel, 0.4);
+      setStatus('live', 'وصل الكلام لكن لم تتم مطابقته بعد', 'حاول القراءة بوضوح أكثر أو تابع لبضع ثوانٍ.');
     };
 
     r.onresult = event => {
@@ -372,7 +406,10 @@
       }
       state.finalTranscript = state.finalTranscript.trim();
       state.interimTranscript = interim.trim();
-      if ((state.finalTranscript + ' ' + state.interimTranscript).trim()) state.transcriptReceived = true;
+      if ((state.finalTranscript + ' ' + state.interimTranscript).trim()) {
+        state.transcriptReceived = true;
+        updateRecognitionMeter('result');
+      }
       updateTranscript();
     };
 
@@ -393,14 +430,19 @@
 
       if (code === 'no-speech') {
         state.error = null;
-        const heardAudio = state.peakAudioLevel >= 0.025;
-        if (heardAudio && state.recognitionAttempt < state.recognitionLangs.length - 1) {
+        const heardAudio = state.peakAudioLevel >= 0.15;
+        if (state.recognitionAttempt < state.recognitionLangs.length - 1) {
           state.recognitionAttempt++;
-          setStatus('live', 'الميكروفون يسمعك — إعادة محاولة التعرف العربي', 'وصلت إشارة صوتية فعلية. يجرب بصيرة إعدادًا عربيًا بديلًا تلقائيًا.');
+          setStatus('live', heardAudio ? 'وصل الصوت — نجرب إعدادًا عربيًا آخر' : 'لم يكتشف Chrome كلامًا — إعادة المحاولة',
+            'يجرب بصيرة لغة عربية بديلة تلقائيًا.');
         } else if (heardAudio) {
-          setStatus('live', 'وصل الصوت — ننتظر النص من Chrome', 'الميكروفون يلتقط صوتك. إذا لم تصل نتيجة نصية خلال ثوانٍ سيظهر خيار المتابعة التجريبية تلقائيًا.');
+          state.shouldRestart = false;
+          updateRecognitionMeter('error');
+          showMicFailure('وصل الصوت إلى Chrome، لكن خدمة التعرف لم تُرجع نصًا عربيًا.');
         } else {
-          setStatus('', 'بانتظار صوت أوضح', 'الميكروفون مفتوح لكن مستوى الصوت منخفض جدًا. اقترب من الميكروفون وتكلم بصوت واضح.');
+          state.shouldRestart = false;
+          updateRecognitionMeter('error');
+          showMicFailure('لم يكتشف Chrome كلامًا من الميكروفون في هذه الجلسة.');
         }
         return;
       }
@@ -456,7 +498,7 @@
     if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
     state.transcriptWatchdog = setTimeout(() => {
       if (state.finishing || state.transcriptReceived) return;
-      const heardAudio = state.peakAudioLevel >= 0.025;
+      const heardAudio = state.peakAudioLevel >= 0.15;
       if (heardAudio) {
         state.shouldRestart = false;
         state.error = 'speech-service-no-transcript';
@@ -526,6 +568,7 @@
     if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
     state.transcriptWatchdog = null;
     stopAudioMeter(true);
+    updateRecognitionMeter('ready');
     el('timer').textContent = '00:00';
     el('startReading').classList.remove('hidden');
     el('startReading').disabled = false;
