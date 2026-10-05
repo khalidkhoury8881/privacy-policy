@@ -145,7 +145,7 @@
       </section>
     </main>
 
-    <footer><span>بصيرة أداة مساندة للتعلم وتحليل أنماط القراءة، ولا تقدم تشخيصًا طبيًا أو بديلًا عن تقييم المختصين.</span><b dir="ltr">Prepared by Khalid Khoury · Web Demo v1.2</b></footer>
+    <footer><span>بصيرة أداة مساندة للتعلم وتحليل أنماط القراءة، ولا تقدم تشخيصًا طبيًا أو بديلًا عن تقييم المختصين.</span><b dir="ltr">Prepared by Khalid Khoury · Web Demo v1.3</b></footer>
   </div>
   <script>
 (() => {
@@ -182,7 +182,9 @@
     audioLevel: 0,
     peakAudioLevel: 0,
     recognitionAttempt: 0,
-    recognitionLangs: ['ar-JO','ar-SA','ar-AE','ar']
+    recognitionLangs: ['ar-SA','ar-JO','ar-AE','ar'],
+    transcriptWatchdog: null,
+    transcriptReceived: false
   };
 
   function normalize(s) {
@@ -370,6 +372,7 @@
       }
       state.finalTranscript = state.finalTranscript.trim();
       state.interimTranscript = interim.trim();
+      if ((state.finalTranscript + ' ' + state.interimTranscript).trim()) state.transcriptReceived = true;
       updateTranscript();
     };
 
@@ -395,8 +398,7 @@
           state.recognitionAttempt++;
           setStatus('live', 'الميكروفون يسمعك — إعادة محاولة التعرف العربي', 'وصلت إشارة صوتية فعلية. يجرب بصيرة إعدادًا عربيًا بديلًا تلقائيًا.');
         } else if (heardAudio) {
-          state.shouldRestart = false;
-          showMicFailure('الميكروفون يلتقط صوتك، لكن خدمة Chrome لم تحوّل الصوت العربي إلى نص في هذه الجلسة.');
+          setStatus('live', 'وصل الصوت — ننتظر النص من Chrome', 'الميكروفون يلتقط صوتك. إذا لم تصل نتيجة نصية خلال ثوانٍ سيظهر خيار المتابعة التجريبية تلقائيًا.');
         } else {
           setStatus('', 'بانتظار صوت أوضح', 'الميكروفون مفتوح لكن مستوى الصوت منخفض جدًا. اقترب من الميكروفون وتكلم بصوت واضح.');
         }
@@ -450,11 +452,32 @@
     el('startReading').classList.remove('hidden');
   }
 
+  function armTranscriptWatchdog() {
+    if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
+    state.transcriptWatchdog = setTimeout(() => {
+      if (state.finishing || state.transcriptReceived) return;
+      const heardAudio = state.peakAudioLevel >= 0.025;
+      if (heardAudio) {
+        state.shouldRestart = false;
+        state.error = 'speech-service-no-transcript';
+        try { state.recognition?.abort(); } catch (_) {}
+        setStatus('error', 'الميكروفون يسمعك لكن خدمة التحويل إلى نص لم تستجب',
+          'وصل صوت فعلي من الميكروفون، لكن متصفح Chrome لم يُرجع نصًا عربيًا. هذا عطل في خدمة التعرف داخل المتصفح وليس في الميكروفون.');
+        el('micError').textContent = 'تم التقاط صوتك بنجاح، لكن خدمة التعرف الصوتي في Chrome لم تُرجع نصًا. يمكنك متابعة العرض التجريبي المعلّم بوضوح، أو تجربة Chrome/Edge على جهاز آخر.';
+        el('micError').classList.remove('hidden');
+        el('fallbackDemo').classList.remove('hidden');
+      }
+    }, 9000);
+  }
+
   async function startLiveReading() {
     el('micError').classList.add('hidden');
     state.error = null;
     state.recognitionAttempt = 0;
     state.peakAudioLevel = 0;
+    state.transcriptReceived = false;
+    if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
+    state.transcriptWatchdog = null;
     state.finalTranscript = '';
     state.interimTranscript = '';
     updateTranscript();
@@ -468,6 +491,7 @@
       state.finishing = false;
       state.recognition.start();
       startTimer();
+      armTranscriptWatchdog();
       el('startReading').classList.add('hidden');
     } catch (e) {
       el('startReading').disabled = false;
@@ -478,6 +502,8 @@
   function stopRecognition() {
     state.shouldRestart = false;
     state.finishing = true;
+    if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
+    state.transcriptWatchdog = null;
     stopTimer();
     if (state.recognition) {
       try { state.recognition.stop(); } catch (_) {}
@@ -496,6 +522,9 @@
     state.error = null;
     state.recognitionAttempt = 0;
     state.peakAudioLevel = 0;
+    state.transcriptReceived = false;
+    if (state.transcriptWatchdog) clearTimeout(state.transcriptWatchdog);
+    state.transcriptWatchdog = null;
     stopAudioMeter(true);
     el('timer').textContent = '00:00';
     el('startReading').classList.remove('hidden');
